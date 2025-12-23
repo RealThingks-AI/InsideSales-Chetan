@@ -253,7 +253,7 @@ export const KanbanBoard = ({
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Fixed top search and controls bar */}
-      <div className="flex-shrink-0 px-4 py-2 bg-background border-b border-border">
+      <div className="flex-shrink-0 px-4 py-2 bg-background border-b border-transparent">
         <div className="flex flex-col lg:flex-row gap-2 items-start lg:items-center justify-between">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 flex-1 min-w-0">
             <div className="relative w-64">
