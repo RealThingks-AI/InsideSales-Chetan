@@ -348,7 +348,7 @@ const Meetings = () => {
                     }
                   }} onCheckedChange={handleSelectAll} aria-label="Select all" />
                     </TableHead>
-                    <TableHead>
+                    <TableHead className="min-w-[200px]">
                       <button onClick={() => handleSort('subject')} className="group flex items-center hover:text-foreground transition-colors">
                         Subject {getSortIcon('subject')}
                       </button>
