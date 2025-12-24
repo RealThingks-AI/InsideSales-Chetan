@@ -44,7 +44,7 @@ export const ResizableDashboard = ({
     const defaults = new Map<WidgetKey, WidgetLayout>();
     DEFAULT_WIDGETS.forEach((w) => defaults.set(w.key, w.defaultLayout));
 
-    return visibleWidgets.map((key, index): LayoutItem => {
+    const baseLayout: LayoutItem[] = visibleWidgets.map((key, index): LayoutItem => {
       const saved = widgetLayouts[key];
       const d = defaults.get(key) ?? { x: 0, y: 0, w: 3, h: 2 };
 
@@ -58,11 +58,14 @@ export const ResizableDashboard = ({
         minH: 2,
       };
     });
+
+    // Compact to avoid gaps/overlaps from previously saved large y-values
+    return verticalCompactor.compact(baseLayout as unknown as Layout, COLS);
   }, [visibleWidgets, widgetLayouts]);
 
   const handleLayoutChange = useCallback(
     (newLayout: Layout) => {
-      const next: WidgetLayoutConfig = {};
+      const next: WidgetLayoutConfig = { ...widgetLayouts };
 
       newLayout.forEach((l) => {
         const key = l.i as WidgetKey;
@@ -73,7 +76,7 @@ export const ResizableDashboard = ({
 
       onLayoutChange(next);
     },
-    [visibleWidgets, onLayoutChange]
+    [visibleWidgets, widgetLayouts, onLayoutChange]
   );
 
   return (
