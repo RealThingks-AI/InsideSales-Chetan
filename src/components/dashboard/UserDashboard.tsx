@@ -16,6 +16,8 @@ import { ResizableDashboard } from "./ResizableDashboard";
 import { toast } from "sonner";
 import { format, isAfter, isBefore, addDays } from "date-fns";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { TaskModal } from "@/components/tasks/TaskModal";
 import { MeetingModal } from "@/components/MeetingModal";
 import { useTasks } from "@/hooks/useTasks";
@@ -1044,10 +1046,40 @@ const UserDashboard = () => {
         </div>
         <div className="flex gap-2 flex-shrink-0">
           {isResizeMode ? (
-            <Button onClick={handleSaveLayout} className="gap-2" disabled={savePreferencesMutation.isPending}>
-              <Check className="w-4 h-4" />
-              {savePreferencesMutation.isPending ? 'Saving...' : 'Done'}
-            </Button>
+            <>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="gap-2">
+                    <Plus className="w-4 h-4" />
+                    Add Widget
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-64 p-0" align="end">
+                  <ScrollArea className="h-64">
+                    <div className="p-2 space-y-1">
+                      {DEFAULT_WIDGETS.filter(w => !visibleWidgets.includes(w.key)).length === 0 ? (
+                        <p className="text-sm text-muted-foreground p-3 text-center">All widgets are already added</p>
+                      ) : (
+                        DEFAULT_WIDGETS.filter(w => !visibleWidgets.includes(w.key)).map(widget => (
+                          <Button
+                            key={widget.key}
+                            variant="ghost"
+                            className="w-full justify-start gap-2"
+                            onClick={() => handleWidgetAdd(widget.key)}
+                          >
+                            {widget.label}
+                          </Button>
+                        ))
+                      )}
+                    </div>
+                  </ScrollArea>
+                </PopoverContent>
+              </Popover>
+              <Button onClick={handleSaveLayout} className="gap-2" disabled={savePreferencesMutation.isPending}>
+                <Check className="w-4 h-4" />
+                {savePreferencesMutation.isPending ? 'Saving...' : 'Done'}
+              </Button>
+            </>
           ) : (
             <>
               <Button variant="outline" size="sm" onClick={() => setIsResizeMode(true)} className="gap-2">

@@ -1,15 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { 
-  X, Plus, GripVertical,
-  Users, FileText, Briefcase, TrendingUp, Clock, Calendar, Activity, Bell, 
-  Target, PieChart, LineChart, DollarSign, Mail, MessageSquare, CheckCircle, AlertTriangle, 
-  Globe, Building2, Star, Trophy, Gauge, ListTodo, PhoneCall, MapPin, Percent, ArrowUpRight, Filter
-} from "lucide-react";
+import { X, GripVertical } from "lucide-react";
 import { WidgetKey, DEFAULT_WIDGETS, WidgetLayoutConfig, WidgetLayout } from "./DashboardCustomizeModal";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface ResizableDashboardProps {
   isResizeMode: boolean;
@@ -139,43 +132,11 @@ export const ResizableDashboard = ({
     setDraggedWidget(null);
   };
 
-  // Get widgets that can be added
+  // Get widgets that can be added (exposed for parent component)
   const availableWidgets = DEFAULT_WIDGETS.filter(w => !visibleWidgets.includes(w.key));
 
   return (
     <div className="relative">
-      {/* Add Widget Button */}
-      {isResizeMode && availableWidgets.length > 0 && (
-        <div className="mb-4 flex justify-center">
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button variant="outline" className="gap-2">
-                <Plus className="w-4 h-4" />
-                Add Widget
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-64 p-0" align="center">
-              <ScrollArea className="h-64">
-                <div className="p-2 space-y-1">
-                  {availableWidgets.map(widget => (
-                    <Button
-                      key={widget.key}
-                      variant="ghost"
-                      className="w-full justify-start gap-2"
-                      onClick={() => onWidgetAdd(widget.key)}
-                    >
-                      {widget.icon}
-                      {widget.label}
-                    </Button>
-                  ))}
-                </div>
-              </ScrollArea>
-            </PopoverContent>
-          </Popover>
-        </div>
-      )}
-
-      {/* Grid Layout */}
       <div 
         ref={gridRef}
         className="grid gap-4"
