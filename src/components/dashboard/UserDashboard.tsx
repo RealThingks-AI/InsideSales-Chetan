@@ -89,25 +89,26 @@ const UserDashboard = () => {
     enabled: !!user?.id,
   });
 
-  // Get visible widgets, order, and layouts from preferences or use defaults
-  const defaultWidgetKeys = DEFAULT_WIDGETS.map(w => w.key);
-  const visibleWidgets: WidgetKey[] = dashboardPrefs?.visible_widgets 
-    ? (dashboardPrefs.visible_widgets as WidgetKey[])
-    : defaultWidgetKeys.filter(k => DEFAULT_WIDGETS.find(w => w.key === k)?.visible);
-  const widgetOrder: WidgetKey[] = dashboardPrefs?.card_order 
-    ? (dashboardPrefs.card_order as WidgetKey[])
-    : defaultWidgetKeys;
-  
+  // Defaults (used before prefs load and when a user has no saved prefs yet)
+  const defaultWidgetKeys = DEFAULT_WIDGETS.map((w) => w.key);
+  const defaultVisibleWidgets = defaultWidgetKeys.filter(
+    (k) => DEFAULT_WIDGETS.find((w) => w.key === k)?.visible
+  );
+
+  // Local state so add/remove/drag/resize feels instant (not waiting on refetch)
+  const [visibleWidgets, setVisibleWidgets] = useState<WidgetKey[]>(defaultVisibleWidgets);
+  const [widgetOrder, setWidgetOrder] = useState<WidgetKey[]>(defaultWidgetKeys);
+
   // Safely parse widget layouts - handle legacy string values gracefully
   const parseWidgetLayouts = (): WidgetLayoutConfig => {
     if (!dashboardPrefs?.layout_view) return {};
-    if (typeof dashboardPrefs.layout_view === 'object') {
+    if (typeof dashboardPrefs.layout_view === "object") {
       return dashboardPrefs.layout_view as WidgetLayoutConfig;
     }
-    if (typeof dashboardPrefs.layout_view === 'string') {
+    if (typeof dashboardPrefs.layout_view === "string") {
       try {
         const parsed = JSON.parse(dashboardPrefs.layout_view);
-        if (typeof parsed === 'object' && parsed !== null) {
+        if (typeof parsed === "object" && parsed !== null) {
           return parsed as WidgetLayoutConfig;
         }
       } catch {
@@ -116,12 +117,32 @@ const UserDashboard = () => {
     }
     return {};
   };
+
   const [widgetLayouts, setWidgetLayouts] = useState<WidgetLayoutConfig>(parseWidgetLayouts());
 
-  // Update layouts when preferences load
+  // When the logged-in user or saved prefs change, sync local state (user-specific)
   useEffect(() => {
+    setIsResizeMode(false);
+
+    if (!user?.id) return;
+
+    const nextVisible: WidgetKey[] = dashboardPrefs?.visible_widgets
+      ? (dashboardPrefs.visible_widgets as WidgetKey[])
+      : defaultVisibleWidgets;
+
+    const nextOrder: WidgetKey[] = dashboardPrefs?.card_order
+      ? (dashboardPrefs.card_order as WidgetKey[])
+      : defaultWidgetKeys;
+
+    setVisibleWidgets(nextVisible);
+    setWidgetOrder(nextOrder);
     setWidgetLayouts(parseWidgetLayouts());
-  }, [dashboardPrefs?.layout_view]);
+  }, [
+    user?.id,
+    dashboardPrefs?.visible_widgets,
+    dashboardPrefs?.card_order,
+    dashboardPrefs?.layout_view,
+  ]);
 
   // Save dashboard preferences
   const savePreferencesMutation = useMutation({
@@ -165,21 +186,54 @@ const UserDashboard = () => {
 
   // Handle widget removal
   const handleWidgetRemove = useCallback((key: WidgetKey) => {
-    const newVisible = visibleWidgets.filter(w => w !== key);
+    const nextVisible = visibleWidgets.filter((w) => w !== key);
+    const nextOrder = widgetOrder.filter((w) => w !== key);
+    const nextLayouts = { ...widgetLayouts };
+    delete nextLayouts[key];
+
+    setVisibleWidgets(nextVisible);
+    setWidgetOrder(nextOrder);
+    setWidgetLayouts(nextLayouts);
+
     savePreferencesMutation.mutate({
-      widgets: newVisible,
-      order: widgetOrder,
-      layouts: widgetLayouts
+      widgets: nextVisible,
+      order: nextOrder,
+      layouts: nextLayouts,
     });
   }, [visibleWidgets, widgetOrder, widgetLayouts, savePreferencesMutation]);
 
   // Handle widget addition
   const handleWidgetAdd = useCallback((key: WidgetKey) => {
-    const newVisible = [...visibleWidgets, key];
+    if (visibleWidgets.includes(key)) return;
+
+    const nextVisible = [...visibleWidgets, key];
+    const nextOrder = widgetOrder.includes(key) ? widgetOrder : [...widgetOrder, key];
+
+    const defaultLayout =
+      DEFAULT_WIDGETS.find((w) => w.key === key)?.defaultLayout ??
+      ({ x: 0, y: 0, w: 3, h: 2 } as WidgetLayout);
+
+    const maxY = Math.max(
+      0,
+      ...Object.values(widgetLayouts).map((l) => (l?.y ?? 0) + (l?.h ?? 0))
+    );
+
+    const nextLayouts = {
+      ...widgetLayouts,
+      [key]: {
+        ...defaultLayout,
+        y: maxY,
+      },
+    };
+
+    setVisibleWidgets(nextVisible);
+    setWidgetOrder(nextOrder);
+    setWidgetLayouts(nextLayouts);
+
     savePreferencesMutation.mutate({
-      widgets: newVisible,
-      order: [...widgetOrder, key],
-      layouts: widgetLayouts
+      widgets: nextVisible,
+      order: nextOrder,
+      layouts: nextLayouts,
     });
   }, [visibleWidgets, widgetOrder, widgetLayouts, savePreferencesMutation]);
 
@@ -1051,7 +1105,7 @@ const UserDashboard = () => {
                 <PopoverTrigger asChild>
                   <Button variant="outline" className="gap-2">
                     <Plus className="w-4 h-4" />
-                    Add Widget
+                    Add New Widget
                   </Button>
                 </PopoverTrigger>
                 <PopoverContent className="w-64 p-0" align="end">
@@ -1112,7 +1166,6 @@ const UserDashboard = () => {
         widgetLayouts={widgetLayouts}
         onLayoutChange={handleLayoutChange}
         onWidgetRemove={handleWidgetRemove}
-        onWidgetAdd={handleWidgetAdd}
         renderWidget={renderWidget}
         containerWidth={containerWidth}
       />
