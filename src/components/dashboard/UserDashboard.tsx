@@ -5,7 +5,11 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Users, FileText, Briefcase, TrendingUp, Clock, CheckCircle2, ArrowRight, Plus, Settings2, Calendar, Activity, Bell, AlertCircle, Info, Loader2 } from "lucide-react";
+import { 
+  Users, FileText, Briefcase, TrendingUp, Clock, CheckCircle2, ArrowRight, Plus, Settings2, Calendar, Activity, Bell, AlertCircle, Info, 
+  Target, PieChart, LineChart, DollarSign, Mail, MessageSquare, CheckCircle, AlertTriangle, 
+  Globe, Building2, Star, Trophy, Gauge, ListTodo, PhoneCall, MapPin, Percent, ArrowUpRight, Filter, GripVertical
+} from "lucide-react";
 import { useState } from "react";
 import { DashboardCustomizeModal, WidgetKey, WidgetSize, WidgetSizeConfig, DEFAULT_WIDGETS } from "./DashboardCustomizeModal";
 import { toast } from "sonner";
@@ -15,6 +19,7 @@ import { TaskModal } from "@/components/tasks/TaskModal";
 import { MeetingModal } from "@/components/MeetingModal";
 import { useTasks } from "@/hooks/useTasks";
 import { Task } from "@/types/task";
+import { DragDropContext, Droppable, Draggable, DropResult } from "@hello-pangea/dnd";
 
 const UserDashboard = () => {
   const { user } = useAuth();
@@ -71,7 +76,7 @@ const UserDashboard = () => {
   const defaultWidgetKeys = DEFAULT_WIDGETS.map(w => w.key);
   const visibleWidgets: WidgetKey[] = dashboardPrefs?.visible_widgets 
     ? (dashboardPrefs.visible_widgets as WidgetKey[])
-    : defaultWidgetKeys;
+    : defaultWidgetKeys.filter(k => DEFAULT_WIDGETS.find(w => w.key === k)?.visible);
   const widgetOrder: WidgetKey[] = dashboardPrefs?.card_order 
     ? (dashboardPrefs.card_order as WidgetKey[])
     : defaultWidgetKeys;
@@ -135,6 +140,37 @@ const UserDashboard = () => {
     },
   });
 
+  // Handle drag and drop on dashboard
+  const handleDashboardDragEnd = (result: DropResult) => {
+    if (!result.destination) return;
+    
+    const orderedVisible = widgetOrder.filter(w => visibleWidgets.includes(w));
+    const items = Array.from(orderedVisible);
+    const [reorderedItem] = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, reorderedItem);
+    
+    // Rebuild full order maintaining hidden widgets positions
+    const newOrder: WidgetKey[] = [];
+    const visibleSet = new Set(items);
+    let visibleIndex = 0;
+    
+    widgetOrder.forEach(key => {
+      if (visibleWidgets.includes(key)) {
+        newOrder.push(items[visibleIndex]);
+        visibleIndex++;
+      } else {
+        newOrder.push(key);
+      }
+    });
+    
+    // Save new order
+    savePreferencesMutation.mutate({ 
+      widgets: visibleWidgets, 
+      order: newOrder, 
+      sizes: widgetSizes 
+    });
+  };
+
   // Fetch user's leads count
   const { data: leadsData, isLoading: leadsLoading } = useQuery({
     queryKey: ['user-leads-count', user?.id],
@@ -177,10 +213,12 @@ const UserDashboard = () => {
       
       const totalValue = userDeals.reduce((sum, d) => sum + (d.total_contract_value || 0), 0);
       const wonDeals = userDeals.filter(d => d.stage === 'Won');
+      const lostDeals = userDeals.filter(d => d.stage === 'Lost');
       const wonValue = wonDeals.reduce((sum, d) => sum + (d.total_contract_value || 0), 0);
       return {
         total: userDeals.length,
         won: wonDeals.length,
+        lost: lostDeals.length,
         totalValue,
         wonValue,
         active: userDeals.filter(d => !['Won', 'Lost', 'Dropped'].includes(d.stage)).length
@@ -240,6 +278,94 @@ const UserDashboard = () => {
         .limit(5);
       if (error) throw error;
       return data || [];
+    },
+    enabled: !!user?.id
+  });
+
+  // Fetch completed tasks count
+  const { data: completedTasksCount } = useQuery({
+    queryKey: ['user-completed-tasks', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return 0;
+      const { count, error } = await supabase
+        .from('tasks')
+        .select('id', { count: 'exact', head: true })
+        .or(`assigned_to.eq.${user.id},created_by.eq.${user.id}`)
+        .eq('status', 'completed');
+      if (error) throw error;
+      return count || 0;
+    },
+    enabled: !!user?.id
+  });
+
+  // Fetch overdue items
+  const { data: overdueItemsCount } = useQuery({
+    queryKey: ['user-overdue-items', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return 0;
+      const today = format(new Date(), 'yyyy-MM-dd');
+      const { count, error } = await supabase
+        .from('tasks')
+        .select('id', { count: 'exact', head: true })
+        .or(`assigned_to.eq.${user.id},created_by.eq.${user.id}`)
+        .in('status', ['open', 'in_progress'])
+        .lt('due_date', today);
+      if (error) throw error;
+      return count || 0;
+    },
+    enabled: !!user?.id
+  });
+
+  // Fetch email stats
+  const { data: emailStats } = useQuery({
+    queryKey: ['user-email-stats', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return { sent: 0, opened: 0, clicked: 0 };
+      const { data, error } = await supabase
+        .from('email_history')
+        .select('id, status, open_count, click_count')
+        .eq('sent_by', user.id);
+      if (error) throw error;
+      const sent = data?.length || 0;
+      const opened = data?.filter(e => (e.open_count || 0) > 0).length || 0;
+      const clicked = data?.filter(e => (e.click_count || 0) > 0).length || 0;
+      return { sent, opened, clicked };
+    },
+    enabled: !!user?.id
+  });
+
+  // Fetch top deals
+  const { data: topDeals } = useQuery({
+    queryKey: ['user-top-deals', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return [];
+      const { data, error } = await supabase
+        .from('deals')
+        .select('id, deal_name, total_contract_value, stage')
+        .or(`created_by.eq.${user.id},lead_owner.eq.${user.id}`)
+        .not('stage', 'in', '("Lost","Dropped")')
+        .order('total_contract_value', { ascending: false })
+        .limit(5);
+      if (error) throw error;
+      return data || [];
+    },
+    enabled: !!user?.id
+  });
+
+  // Fetch accounts data
+  const { data: accountsData } = useQuery({
+    queryKey: ['user-accounts-summary', user?.id],
+    queryFn: async () => {
+      if (!user?.id) return { total: 0, healthy: 0, atRisk: 0 };
+      const { data, error } = await supabase
+        .from('accounts')
+        .select('id, score, status')
+        .eq('created_by', user.id);
+      if (error) throw error;
+      const total = data?.length || 0;
+      const healthy = data?.filter(a => (a.score || 0) >= 70).length || 0;
+      const atRisk = data?.filter(a => (a.score || 0) < 40).length || 0;
+      return { total, healthy, atRisk };
     },
     enabled: !!user?.id
   });
@@ -319,14 +445,6 @@ const UserDashboard = () => {
   const isLoading = leadsLoading || contactsLoading || dealsLoading || actionItemsLoading;
   const isWidgetVisible = (key: WidgetKey) => visibleWidgets.includes(key);
 
-  // Get ordered visible widgets for stats row
-  const statsWidgets: WidgetKey[] = ["leads", "contacts", "deals", "actionItems"];
-  const orderedStatsWidgets = widgetOrder.filter(w => statsWidgets.includes(w) && isWidgetVisible(w));
-
-  // Get ordered visible widgets for other sections
-  const getOrderedWidgets = (keys: WidgetKey[]) => 
-    widgetOrder.filter(w => keys.includes(w) && isWidgetVisible(w));
-
   if (isLoading) {
     return (
       <div className="p-6 space-y-6">
@@ -337,6 +455,22 @@ const UserDashboard = () => {
       </div>
     );
   }
+
+  // Placeholder widget component for widgets without real data yet
+  const PlaceholderWidget = ({ title, icon, description }: { title: string; icon: React.ReactNode; description: string }) => (
+    <Card className="h-full animate-fade-in">
+      <CardHeader className="flex flex-row items-center justify-between pb-2">
+        <CardTitle className="text-sm font-medium">{title}</CardTitle>
+        {icon}
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-col items-center justify-center py-4 text-center">
+          <div className="text-muted-foreground/50 mb-2">{icon}</div>
+          <p className="text-sm text-muted-foreground">{description}</p>
+        </div>
+      </CardContent>
+    </Card>
+  );
 
   const renderWidget = (key: WidgetKey) => {
     switch (key) {
@@ -686,18 +820,226 @@ const UserDashboard = () => {
             </CardContent>
           </Card>
         );
+      
+      // New widget implementations
+      case "salesTarget":
+        return (
+          <Card className="h-full animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Sales Target</CardTitle>
+              <Target className="w-4 h-4 text-amber-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{formatCurrency(dealsData?.wonValue || 0)}</div>
+              <p className="text-xs text-muted-foreground">Won this period</p>
+              <div className="mt-3 h-2 bg-muted rounded-full overflow-hidden">
+                <div className="h-full bg-amber-500 rounded-full" style={{ width: `${Math.min(((dealsData?.wonValue || 0) / 100000) * 100, 100)}%` }} />
+              </div>
+            </CardContent>
+          </Card>
+        );
+      case "pipelineValue":
+        return (
+          <Card className="h-full hover:shadow-lg transition-shadow cursor-pointer animate-fade-in" onClick={() => navigate('/deals')}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Pipeline Value</CardTitle>
+              <DollarSign className="w-4 h-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{formatCurrency(dealsData?.totalValue || 0)}</div>
+              <p className="text-xs text-muted-foreground">{dealsData?.active || 0} active deals</p>
+            </CardContent>
+          </Card>
+        );
+      case "conversionRate":
+        const totalDeals = (dealsData?.won || 0) + (dealsData?.lost || 0);
+        const convRate = totalDeals > 0 ? Math.round((dealsData?.won || 0) / totalDeals * 100) : 0;
+        return (
+          <Card className="h-full animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Conversion Rate</CardTitle>
+              <Percent className="w-4 h-4 text-blue-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{convRate}%</div>
+              <p className="text-xs text-muted-foreground">{dealsData?.won || 0} won / {totalDeals} closed</p>
+            </CardContent>
+          </Card>
+        );
+      case "completedTasks":
+        return (
+          <Card className="h-full hover:shadow-lg transition-shadow cursor-pointer animate-fade-in" onClick={() => navigate('/tasks')}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Completed Tasks</CardTitle>
+              <CheckCircle className="w-4 h-4 text-green-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{completedTasksCount || 0}</div>
+              <p className="text-xs text-muted-foreground">Tasks completed</p>
+            </CardContent>
+          </Card>
+        );
+      case "overdueItems":
+        return (
+          <Card className="h-full hover:shadow-lg transition-shadow cursor-pointer animate-fade-in" onClick={() => navigate('/tasks')}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Overdue Items</CardTitle>
+              <AlertTriangle className="w-4 h-4 text-red-600" />
+            </CardHeader>
+            <CardContent>
+              <div className={`text-2xl font-bold ${(overdueItemsCount || 0) > 0 ? 'text-red-600' : ''}`}>{overdueItemsCount || 0}</div>
+              <p className="text-xs text-muted-foreground">{(overdueItemsCount || 0) > 0 ? 'Needs attention' : 'All caught up!'}</p>
+            </CardContent>
+          </Card>
+        );
+      case "emailStats":
+        return (
+          <Card className="h-full animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Email Statistics</CardTitle>
+              <Mail className="w-4 h-4 text-blue-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <p className="text-xl font-bold">{emailStats?.sent || 0}</p>
+                  <p className="text-xs text-muted-foreground">Sent</p>
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-green-600">{emailStats?.opened || 0}</p>
+                  <p className="text-xs text-muted-foreground">Opened</p>
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-blue-600">{emailStats?.clicked || 0}</p>
+                  <p className="text-xs text-muted-foreground">Clicked</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      case "topDeals":
+        return (
+          <Card className="h-full animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="flex items-center gap-2">
+                <Trophy className="w-5 h-5 text-amber-500" />
+                Top Deals
+              </CardTitle>
+              <Button variant="ghost" size="sm" onClick={() => navigate('/deals')}>
+                View All
+              </Button>
+            </CardHeader>
+            <CardContent>
+              {topDeals && topDeals.length > 0 ? (
+                <div className="space-y-2">
+                  {topDeals.slice(0, 5).map((deal, idx) => (
+                    <div key={deal.id} className="flex items-center justify-between p-2 rounded-lg bg-muted/50">
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        <span className="text-xs font-bold text-muted-foreground">#{idx + 1}</span>
+                        <p className="text-sm font-medium truncate">{deal.deal_name}</p>
+                      </div>
+                      <span className="text-sm font-semibold text-green-600">{formatCurrency(deal.total_contract_value || 0)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center py-6 text-center">
+                  <Trophy className="w-8 h-8 text-muted-foreground/50 mb-2" />
+                  <p className="text-sm text-muted-foreground">No deals yet</p>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        );
+      case "accountHealth":
+        return (
+          <Card className="h-full animate-fade-in" onClick={() => navigate('/accounts')}>
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Account Health</CardTitle>
+              <Building2 className="w-4 h-4 text-blue-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div>
+                  <p className="text-xl font-bold">{accountsData?.total || 0}</p>
+                  <p className="text-xs text-muted-foreground">Total</p>
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-green-600">{accountsData?.healthy || 0}</p>
+                  <p className="text-xs text-muted-foreground">Healthy</p>
+                </div>
+                <div>
+                  <p className="text-xl font-bold text-red-600">{accountsData?.atRisk || 0}</p>
+                  <p className="text-xs text-muted-foreground">At Risk</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      case "winLossRatio":
+        const winLossTotal = (dealsData?.won || 0) + (dealsData?.lost || 0);
+        const winRate = winLossTotal > 0 ? Math.round((dealsData?.won || 0) / winLossTotal * 100) : 0;
+        return (
+          <Card className="h-full animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Win/Loss Ratio</CardTitle>
+              <PieChart className="w-4 h-4 text-purple-600" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{dealsData?.won || 0}:{dealsData?.lost || 0}</div>
+              <p className="text-xs text-muted-foreground">{winRate}% win rate</p>
+            </CardContent>
+          </Card>
+        );
+      case "customerRetention":
+        return (
+          <Card className="h-full animate-fade-in">
+            <CardHeader className="flex flex-row items-center justify-between pb-2">
+              <CardTitle className="text-sm font-medium">Customer Retention</CardTitle>
+              <Star className="w-4 h-4 text-amber-500" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{accountsData?.healthy || 0}</div>
+              <p className="text-xs text-muted-foreground">Healthy accounts</p>
+            </CardContent>
+          </Card>
+        );
+      
+      // Placeholder widgets for features that need more data
+      case "revenueChart":
+        return <PlaceholderWidget title="Revenue Chart" icon={<LineChart className="w-4 h-4 text-green-600" />} description="Revenue trends over time" />;
+      case "dealForecast":
+        return <PlaceholderWidget title="Deal Forecast" icon={<ArrowUpRight className="w-4 h-4 text-blue-600" />} description="Predicted deal outcomes" />;
+      case "callLog":
+        return <PlaceholderWidget title="Call Log" icon={<PhoneCall className="w-4 h-4 text-purple-600" />} description="Recent call activities" />;
+      case "teamActivity":
+        return <PlaceholderWidget title="Team Activity" icon={<MessageSquare className="w-4 h-4 text-blue-600" />} description="Team collaboration updates" />;
+      case "taskProgress":
+        return <PlaceholderWidget title="Task Progress" icon={<ListTodo className="w-4 h-4 text-amber-600" />} description="Task completion progress" />;
+      case "regionStats":
+        return <PlaceholderWidget title="Region Statistics" icon={<Globe className="w-4 h-4 text-teal-600" />} description="Performance by region" />;
+      case "geoDistribution":
+        return <PlaceholderWidget title="Geo Distribution" icon={<MapPin className="w-4 h-4 text-red-600" />} description="Geographic data distribution" />;
+      case "leadSources":
+        return <PlaceholderWidget title="Lead Sources" icon={<Filter className="w-4 h-4 text-indigo-600" />} description="Where leads come from" />;
+      case "salesVelocity":
+        return <PlaceholderWidget title="Sales Velocity" icon={<Gauge className="w-4 h-4 text-orange-600" />} description="Speed of sales cycle" />;
+      case "growthTrend":
+        return <PlaceholderWidget title="Growth Trend" icon={<TrendingUp className="w-4 h-4 text-green-600" />} description="Business growth over time" />;
       default:
         return null;
     }
   };
 
-  // Get widget size class
+  // Get widget size class with xs and xl support
   const getWidgetSizeClass = (key: WidgetKey): string => {
     const size = widgetSizes[key] || DEFAULT_WIDGETS.find(w => w.key === key)?.size || "medium";
     switch (size) {
-      case "small": return "col-span-1";
-      case "medium": return "col-span-1 lg:col-span-2";
-      case "large": return "col-span-1 lg:col-span-3";
+      case "xs": return "col-span-1";
+      case "small": return "col-span-1 md:col-span-1";
+      case "medium": return "col-span-1 md:col-span-2 lg:col-span-2";
+      case "large": return "col-span-1 md:col-span-2 lg:col-span-3";
+      case "xl": return "col-span-1 md:col-span-2 lg:col-span-4 xl:col-span-6";
       default: return "col-span-1";
     }
   };
@@ -720,14 +1062,42 @@ const UserDashboard = () => {
         </Button>
       </div>
 
-      {/* Responsive Grid Layout */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
-        {orderedVisibleWidgets.map(key => (
-          <div key={key} className={getWidgetSizeClass(key)}>
-            {renderWidget(key)}
-          </div>
-        ))}
-      </div>
+      {/* Draggable Grid Layout */}
+      <DragDropContext onDragEnd={handleDashboardDragEnd}>
+        <Droppable droppableId="dashboard-widgets" direction="horizontal">
+          {(provided) => (
+            <div 
+              {...provided.droppableProps}
+              ref={provided.innerRef}
+              className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6"
+            >
+              {orderedVisibleWidgets.map((key, index) => (
+                <Draggable key={key} draggableId={key} index={index}>
+                  {(provided, snapshot) => (
+                    <div 
+                      ref={provided.innerRef}
+                      {...provided.draggableProps}
+                      className={`${getWidgetSizeClass(key)} ${snapshot.isDragging ? 'z-50' : ''}`}
+                    >
+                      <div className={`relative group h-full ${snapshot.isDragging ? 'ring-2 ring-primary shadow-lg' : ''}`}>
+                        {/* Drag handle overlay */}
+                        <div 
+                          {...provided.dragHandleProps}
+                          className="absolute top-2 right-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing bg-background/80 backdrop-blur-sm p-1 rounded-md shadow-sm"
+                        >
+                          <GripVertical className="w-4 h-4 text-muted-foreground" />
+                        </div>
+                        {renderWidget(key)}
+                      </div>
+                    </div>
+                  )}
+                </Draggable>
+              ))}
+              {provided.placeholder}
+            </div>
+          )}
+        </Droppable>
+      </DragDropContext>
 
       {/* Customize Modal */}
       <DashboardCustomizeModal
