@@ -126,13 +126,33 @@ const UserDashboard = () => {
 
     if (!user?.id) return;
 
-    const nextVisible: WidgetKey[] = dashboardPrefs?.visible_widgets
+    const sanitizeKeys = (keys: WidgetKey[]) => {
+      const allowed = new Set(defaultWidgetKeys);
+      const uniq: WidgetKey[] = [];
+      const seen = new Set<string>();
+      keys.forEach((k) => {
+        if (!allowed.has(k)) return;
+        if (seen.has(k)) return;
+        seen.add(k);
+        uniq.push(k);
+      });
+      return uniq;
+    };
+
+    const nextVisibleRaw: WidgetKey[] = dashboardPrefs?.visible_widgets
       ? (dashboardPrefs.visible_widgets as WidgetKey[])
       : defaultVisibleWidgets;
 
-    const nextOrder: WidgetKey[] = dashboardPrefs?.card_order
+    const nextOrderRaw: WidgetKey[] = dashboardPrefs?.card_order
       ? (dashboardPrefs.card_order as WidgetKey[])
       : defaultWidgetKeys;
+
+    const nextVisible = sanitizeKeys(nextVisibleRaw);
+
+    // Order should be unique, valid, and contain all visible widgets
+    const nextOrderBase = sanitizeKeys(nextOrderRaw);
+    const missingVisible = nextVisible.filter((k) => !nextOrderBase.includes(k));
+    const nextOrder = [...nextOrderBase, ...missingVisible];
 
     setVisibleWidgets(nextVisible);
     setWidgetOrder(nextOrder);
@@ -1177,6 +1197,8 @@ const UserDashboard = () => {
         visibleWidgets={visibleWidgets}
         widgetOrder={widgetOrder}
         onSave={(widgets, order) => {
+          setVisibleWidgets(widgets);
+          setWidgetOrder(order);
           savePreferencesMutation.mutate({ widgets, order, layouts: widgetLayouts });
           setCustomizeOpen(false);
         }}
